@@ -17,104 +17,123 @@ class DigDugEnv(gym.Env):
     def __init__(self):
         super(DigDugEnv, self).__init__()
         self.action_space = spaces.Discrete(5)  # 0=Up, 1=Down, 2=Left, 3=Right, 4=Attack
-        self.observation_space = spaces.Box(low=0, high=1, shape=(48, 24, 1), dtype=np.float32)
+        self.observation_space = spaces.Box(low=0, high=1, shape=(41,1), dtype=np.float32)
         self.state = self.reset()
         self.player_pos = [0,0]
         self.enemies = []
-        self._count = 0;
-        self._reset = False;
+        self._count = 0
+        self._reset = False
 
     def is_reset(self):
-        return self._reset;
+        return self._reset
     def set_reset(self):
-        self._reset = False;
+        self._reset = False
         
         
     def reset(self):
         print("Bigger reset")
-        self.state = np.zeros((48, 24, 1))
+        self.state = np.zeros((41, 1))
         #The initial position
         self.player_pos = [0,0]
         #No enemies detected at the beginning 
         self.enemies = []
-        self._reset = True;
+        self._reset = True
         return self.state
     
-    def _get_observation(self,enemies_pos):
+    def _get_observation(self,map,digdug,target,last_action,direction, num_enemies):
         #Colocamos na matriz do mapa 1 caso tenha o dd e 2 caso tenha um inimigo
          #Eventualmente podemos diferenciar o tipo de inimigo
         #Colocar se um inimigo morreu na ronda anterior, ou se foi atingido
-        observation = np.zeros((48,24))
-        self.enemies = enemies_pos
-        px, py = self.player_pos
-        px = max(0, min(px, 47))  
-        py = max(0, min(py, 23)) 
-        observation[px, py] = 1
-        for x, y in self.enemies:
-            x = max(0, min(x, 47))  
-            y = max(0, min(y, 23))  
-            observation[x, y] = 2
-
+        observation = np.zeros((41,1))
+        observation[40] = direction
+        observation[39] = last_action
+        print("DD:", digdug)
+        if target[0] != -1:
+            observation[37] = target[0] - digdug[0]
+            observation[38] = target[1] - digdug[1]
+        else:
+            observation[37] = -1
+            observation[38] = -1
+        observation[35] = digdug[0]
+        observation[36] = digdug[1]
+    
+        if direction == 0: #Up
+            ddx = digdug[0] - 2
+            ddy = digdug[1] + 2
+            for i_1 in range(7):
+                for i_2 in range(5):
+                    observation[i_1*5 + i_2] = self.get_from_map(map, ddx + i_2, ddy - i_1) 
+        elif direction == 1: #Down
+            ddx = digdug[0] + 2
+            ddy = digdug[1] - 2
+            for i_1 in range(7):
+                for i_2 in range(5):
+                    observation[i_1*5 + i_2] = self.get_from_map(map, ddx - i_2, ddy + i_1) 
+        elif direction == 2:  #Left
+            ddx = digdug[0] + 2
+            ddy = digdug[1] + 2
+            for i_1 in range(7):
+                for i_2 in range(5):
+                    observation[i_1*5 + i_2] = self.get_from_map(map, ddx - i_1, ddy - i_2)  
+        else: #Right
+            ddx = digdug[0] - 2
+            ddy = digdug[1] - 2
+            for i_1 in range(7):
+                for i_2 in range(5):
+                    observation[i_1*5 + i_2] = self.get_from_map(map, ddx + i_1, ddy + i_2)  
         return observation
 
+    def get_from_map(self, map, posx, posy):
+        if posx < 0 or posx > 47 or posy < 0 or posy > 23:
+            return -1
+        return map[posx][posy]
+
     def step(self, action):
-        closest_enemy =self._closest_enemy()
-        dx =closest_enemy[0] - self.player_pos[0]
+        closest_enemy = self._closest_enemy()
+        dx = closest_enemy[0] - self.player_pos[0]
         dy = closest_enemy[1] - self.player_pos[1]
-        #print(self.player_pos)
-        #print(closest_enemy)
-        print("count:", self._count)
-        self._count += 1;
 
+        prev_distance = abs(dx) + abs(dy)
+
+        self._count += 1
         if self._count == 300:
-            self.reset();
-            self._count = 0;
+            self.reset()
+            self._count = 0
 
+        reward = -1  # Small penalty for each step to encourage faster actions
 
-        if action == 0: #Up
+        if action == 0:  # Up
             if self.player_pos[0] < 47:
-                self.player_pos[0]+=1
-            #The reward will be negative to make the agent take the least steps to a destination
-            if dx > 0 and abs(dx) > 3:
-                reward = - (abs(dx) + abs(dy)) + 100 #If it goes in the right direction the penalty will be less
-            else:
-                reward = - (abs(dx) + abs(dy))
-        elif action == 1: #Down
+                self.player_pos[0] += 1
+        elif action == 1:  # Down
             if self.player_pos[0] > 0:
-                self.player_pos[0]-=1
-            #The reward will be negative to make the agent take the least steps to a destination
-            if dx < 0 and abs(dx) > 3:
-                reward = - (abs(dx) + abs(dy)) + 100 #If it goes in the right direction the penalty will be less
-            else:
-                reward = - (abs(dx) + abs(dy))
-        elif action == 2: #Left
+                self.player_pos[0] -= 1
+        elif action == 2:  # Left
             if self.player_pos[1] > 0:
-                self.player_pos[1] -=1
-            #The reward will be negative to make the agent take the least steps to a destination
-            if dy < 0 and abs(dy)>3: 
-                reward = - (abs(dx) + abs(dy)) + 100 #If it goes in the right direction the penalty will be less
-            else:
-                reward = - (abs(dx) + abs(dy))
-        elif action == 3: #Right
+                self.player_pos[1] -= 1
+        elif action == 3:  # Right
             if self.player_pos[1] < 23:
-                self.player_pos[1] +=1
-            #The reward will be negative to make the agent take the least steps to a destination
-            if dy > 0 and abs(dy)>3: 
-                reward = - (abs(dx) + abs(dy)) + 100  #If it goes in the right direction the penalty will be less
-            else:
-                reward = - (abs(dx) + abs(dy))
-        elif action == 4: #Attack
+                self.player_pos[1] += 1
+        elif action == 4:  # Attack
             if abs(dy) < 3 and abs(dx) < 3:
-                reward = 300
+                reward = 300  # High reward for a successful attack
             else:
                 reward = - (abs(dx) + abs(dy))
 
-        #Colocar estado para se o inimigo morreu ganhar mais premio
-                
+        # Recalculate distance after the action
+        new_dx = closest_enemy[0] - self.player_pos[0]
+        new_dy = closest_enemy[1] - self.player_pos[1]
+        new_distance = abs(new_dx) + abs(new_dy)
+
+        # Provide positive reward if the agent moves closer to the enemy
+        if new_distance < prev_distance:
+            reward += 10  # Reward for moving closer to the enemy
+        elif new_distance > prev_distance:
+            reward -= 10  # Penalty for moving away from the enemy
+
         next_state = self.state
-        
-        #print(reward)
         done = False
+
         return next_state, reward, done, {}
 
     def _closest_enemy(self):
@@ -129,8 +148,3 @@ class DigDugEnv(gym.Env):
                 min_distance = distance
                 enemy = enemy_pos
         return enemy
-
-
-
-
-

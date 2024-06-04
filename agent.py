@@ -28,6 +28,21 @@ import envg
 
 
 
+def closer_enemy(player_pos, enemies):
+    # Calcula a distância euclidiana entre o jogador e o inimigo mais próximo
+    min_distance = float(100.0)
+    enemy = [0,0]
+    if len(enemies) == 0:
+        print("No enemies")
+        return [-1, -1]
+    print("ENEMIES:", enemies)
+    for enemy_pos in enemies: 
+        enemy_pos = np.array(enemy_pos)
+        distance = abs(player_pos[0]-enemy_pos[0])+abs(player_pos[1]-enemy_pos[1])
+        if distance < min_distance:
+            min_distance = distance
+            enemy = enemy_pos
+    return enemy
 
 env = gym_wrapper.GymWrapper(envg.DigDugEnv())
 train_env = tf_py_environment.TFPyEnvironment(env)
@@ -90,6 +105,10 @@ async def agent_loop(server_address="localhost:8000", agent_name="student"):
         initial_exp = 100
         initial_p = 1500
         epsilon = 0.1
+
+        last_action = None
+        last_direction = 3
+        mapa = np.zeros((48,24))
         while True:
             try:
                 state = json.loads(
@@ -98,18 +117,18 @@ async def agent_loop(server_address="localhost:8000", agent_name="student"):
                 key = ""
                 action = 0
                 t+=1
-                player_pos = state.get("digdug")
-                enemies = state.get("enemies", [])
-                enemies_pos = []
-                enemies_dir = []
-                for enemy_info in enemies:
-                    enemies_pos.append(enemy_info["pos"])
-                    enemies_dir.append(enemy_info["dir"])
-                if len(enemies_pos)!=0:
-                    env.enemies = enemies_pos
-                    observation = env._get_observation(enemies_pos)
+                digdug = state.get("digdug", [1, 1])
+                enemies = []
+                enemy_info_all = state.get("enemies", [])
+                for enemy_info in enemy_info_all:
+                    enemies.append(enemy_info["pos"])
+                num_enemies = len(enemies)
+                target = closer_enemy(digdug, enemies)
+                if state.get('map'):
+                    mapa = state.get('map')
+                observation = env._get_observation(mapa, digdug, target, last_action, last_direction, num_enemies)
 
-                    time_step = train_env.current_time_step()
+                time_step = train_env.current_time_step()
 
                 # action_spec = train_env.action_spec()
                 # action = np.random.randint(action_spec.minimum, action_spec.maximum + 1)
@@ -127,15 +146,18 @@ async def agent_loop(server_address="localhost:8000", agent_name="student"):
                         action_step = agent.policy.action(time_step)
                     
                 action = action_step.action.numpy()[0]
+                last_action = action
+                if action != 4:
+                    last_direction = action
                 print(action)
                 if action == 0:
-                    key = 'd'
-                elif action == 1:
-                    key = 'a'
-                elif action == 2:
                     key = 'w'
-                elif action == 3:
+                elif action == 1:
                     key = 's'
+                elif action == 2:
+                    key = 'a'
+                elif action == 3:
+                    key = 'd'
                 elif action == 4:
                     key = 'A'
                     
@@ -148,13 +170,15 @@ async def agent_loop(server_address="localhost:8000", agent_name="student"):
                     json.dumps({"cmd": "key", "key": key})
                 )  # send key command to server - you must implement this send in the AI agent
                 
-                enemies_pos = []
-                enemies_dir = []
-                for enemy_info in enemies:
-                    enemies_pos.append(enemy_info["pos"])
-                    enemies_dir.append(enemy_info["dir"])
-                env.enemies = enemies_pos
-                observation = env._get_observation(enemies_pos)
+                digdug = state.get("digdug", [1,1])
+                enemies = []
+                enemy_info_all = state.get("enemies", [])
+                for enemy_info in enemy_info_all:
+                    enemies.append(enemy_info["pos"])
+                num_enemies = len(enemies)
+                target = closer_enemy(digdug, enemies)
+
+                observation = env._get_observation(mapa, digdug, target, last_action, last_direction, num_enemies)
                 next_time_step = train_env.step(action)
                 
                 traj = trajectory.from_transition(time_step,action_step,next_time_step)
@@ -164,8 +188,6 @@ async def agent_loop(server_address="localhost:8000", agent_name="student"):
                 if t>= initial_exp:
                     experience, unused_info = next(iterator)
                     agent.train(experience)
-                    
-                
             except websockets.exceptions.ConnectionClosedOK:
                 print("Server has cleanly disconnected us")
                 return
